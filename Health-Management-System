@@ -1,0 +1,270 @@
+package service;
+
+import model.*;
+import java.io.*;
+import java.time.LocalDate;
+import java.util.*;
+
+public class HealthDataManager implements Serializable {
+    private static final long serialVersionUID = 1L;
+    private static HealthDataManager instance;
+    private Map<String, User> users;
+    private List<HealthRecord> healthRecords;
+    private String dataFilePath;
+    
+    private HealthDataManager() {
+        users = new HashMap<>();
+        healthRecords = new ArrayList<>();
+        dataFilePath = "data/health_data.dat";
+        loadData();
+    }
+    
+    public static HealthDataManager getInstance() {
+        if (instance == null) {
+            instance = new HealthDataManager();
+        }
+        return instance;
+    }
+    
+    // User Management
+    public boolean addUser(User user) {
+        if (users.containsKey(user.getUserId())) {
+            return false;
+        }
+        users.put(user.getUserId(), user);
+        saveData();
+        return true;
+    }
+    
+    public User getUser(String userId) {
+        return users.get(userId);
+    }
+    
+    public List<User> getAllUsers() {
+        return new ArrayList<>(users.values());
+    }
+    
+    public boolean deleteUser(String userId) {
+        if (users.remove(userId) != null) {
+            // Also remove all health records for this user
+            healthRecords.removeIf(record -> record.getUserId().equals(userId));
+            saveData();
+            return true;
+        }
+        return false;
+    }
+    
+    // Health Record Management
+    public void addHealthRecord(HealthRecord record) {
+        healthRecords.add(record);
+        saveData();
+    }
+    
+    public List<HealthRecord> getUserRecords(String userId) {
+        List<HealthRecord> userRecords = new ArrayList<>();
+        for (HealthRecord record : healthRecords) {
+            if (record.getUserId().equals(userId)) {
+                userRecords.add(record);
+            }
+        }
+        return userRecords;
+    }
+    
+    public List<HealthRecord> getUserRecordsByType(String userId, String type) {
+        List<HealthRecord> filtered = new ArrayList<>();
+        for (HealthRecord record : healthRecords) {
+            if (record.getUserId().equals(userId) && record.getType().equals(type)) {
+                filtered.add(record);
+            }
+        }
+        return filtered;
+    }
+    
+    public List<HealthRecord> getRecentRecords(String userId, int days) {
+        LocalDate cutoffDate = LocalDate.now().minusDays(days);
+        List<HealthRecord> recent = new ArrayList<>();
+        for (HealthRecord record : healthRecords) {
+            if (record.getUserId().equals(userId) && record.getDate().isAfter(cutoffDate)) {
+                recent.add(record);
+            }
+        }
+        return recent;
+    }
+    
+    // Statistics and Calculations
+    public double calculateOverallHealthScore(String userId) {
+        List<HealthRecord> records = getUserRecords(userId);
+        if (records.isEmpty()) return 0;
+        
+        double totalScore = 0;
+        for (HealthRecord record : records) {
+            totalScore += record.getScore();
+        }
+        
+        return totalScore / records.size();
+    }
+    
+    public Map<String, Double> getCategoryAverages(String userId) {
+        Map<String, Double> categoryAverages = new HashMap<>();
+        String[] categories = {"Sleep", "Exercise", "Nutrition", "Stress"};
+        
+        for (String category : categories) {
+            List<HealthRecord> records = getUserRecordsByType(userId, category);
+            if (!records.isEmpty()) {
+                double total = 0;
+                for (HealthRecord record : records) {
+                    total += record.getScore();
+                }
+                categoryAverages.put(category, total / records.size());
+            } else {
+                categoryAverages.put(category, 0.0);
+            }
+        }
+        return categoryAverages;
+    }
+    
+    public Map<String, Integer> getRecordCounts(String userId) {
+        Map<String, Integer> counts = new HashMap<>();
+        for (HealthRecord record : healthRecords) {
+            if (record.getUserId().equals(userId)) {
+                counts.put(record.getType(), counts.getOrDefault(record.getType(), 0) + 1);
+            }
+        }
+        return counts;
+    }
+    
+    public String getComprehensiveRecommendation(String userId) {
+        double overallScore = calculateOverallHealthScore(userId);
+        Map<String, Double> categoryAverages = getCategoryAverages(userId);
+        Map<String, Integer> recordCounts = getRecordCounts(userId);
+        
+        StringBuilder recommendation = new StringBuilder();
+        recommendation.append("═══════════════════════════════════════════════════════════\n");
+        recommendation.append("              🏥 PERSONALIZED HEALTH REPORT\n");
+        recommendation.append("═══════════════════════════════════════════════════════════\n\n");
+        
+        User user = getUser(userId);
+        recommendation.append("👤 Student: ").append(user.getFullName()).append("\n");
+        recommendation.append("📅 Report Date: ").append(LocalDate.now()).append("\n\n");
+        
+        recommendation.append("📊 OVERALL HEALTH SCORE: ");
+        if (overallScore >= 85) {
+            recommendation.append(String.format("🌟 %.1f/100 - Excellent!\n", overallScore));
+        } else if (overallScore >= 70) {
+            recommendation.append(String.format("✅ %.1f/100 - Good\n", overallScore));
+        } else if (overallScore >= 50) {
+            recommendation.append(String.format("⚠️ %.1f/100 - Fair\n", overallScore));
+        } else {
+            recommendation.append(String.format("🔴 %.1f/100 - Needs Improvement\n", overallScore));
+        }
+        
+        recommendation.append("\n📈 CATEGORY BREAKDOWN:\n");
+        recommendation.append("───────────────────────────────────────────────────────────\n");
+        
+        for (Map.Entry<String, Double> entry : categoryAverages.entrySet()) {
+            String category = entry.getKey();
+            Double score = entry.getValue();
+            String icon = getCategoryIcon(category);
+            
+            recommendation.append(String.format("%s %-10s: %.1f/100", icon, category, score));
+            
+            if (score < 50) {
+                recommendation.append(" 🔴 CRITICAL\n");
+            } else if (score < 70) {
+                recommendation.append(" 🟡 NEEDS IMPROVEMENT\n");
+            } else if (score >= 85) {
+                recommendation.append(" 🌟 EXCELLENT\n");
+            } else {
+                recommendation.append(" 🟢 GOOD\n");
+            }
+        }
+        
+        recommendation.append("\n💡 RECOMMENDATIONS:\n");
+        recommendation.append("───────────────────────────────────────────────────────────\n");
+        
+        for (Map.Entry<String, Double> entry : categoryAverages.entrySet()) {
+            String category = entry.getKey();
+            Double score = entry.getValue();
+            
+            if (score < 70 && score > 0) {
+                recommendation.append(getCategoryRecommendation(category)).append("\n");
+            }
+        }
+        
+        if (recordCounts.isEmpty()) {
+            recommendation.append("\n📝 TIP: Start tracking your health daily to get better insights!\n");
+        } else {
+            recommendation.append("\n📊 Tracking Summary:\n");
+            for (Map.Entry<String, Integer> entry : recordCounts.entrySet()) {
+                recommendation.append(String.format("   • %s: %d records\n", entry.getKey(), entry.getValue()));
+            }
+        }
+        
+        recommendation.append("\n═══════════════════════════════════════════════════════════\n");
+        recommendation.append("        Stay healthy! 💪 Take care of your well-being!\n");
+        recommendation.append("═══════════════════════════════════════════════════════════\n");
+        
+        return recommendation.toString();
+    }
+    
+    private String getCategoryIcon(String category) {
+        switch (category) {
+            case "Sleep": return "😴";
+            case "Exercise": return "🏃";
+            case "Nutrition": return "🍎";
+            case "Stress": return "🧠";
+            default: return "📊";
+        }
+    }
+    
+    private String getCategoryRecommendation(String category) {
+        switch (category) {
+            case "Sleep":
+                return "😴 Improve sleep: Aim for 7-9 hours, maintain consistent schedule, create dark quiet environment";
+            case "Exercise":
+                return "🏃 Increase activity: Aim for 30 min daily, try walking, running, or joining sports clubs";
+            case "Nutrition":
+                return "🍎 Better nutrition: Eat 3 meals, 5+ fruits/veg, drink 2L water, never skip breakfast";
+            case "Stress":
+                return "🧠 Manage stress: Practice mindfulness, take breaks, talk to friends, consider counseling";
+            default:
+                return "📊 Focus on improving your health habits";
+        }
+    }
+    
+    // File I/O
+    private void saveData() {
+        File dataDir = new File("data");
+        if (!dataDir.exists()) {
+            dataDir.mkdirs();
+        }
+        
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(dataFilePath))) {
+            oos.writeObject(users);
+            oos.writeObject(healthRecords);
+        } catch (IOException e) {
+            System.err.println("⚠️ Error saving data: " + e.getMessage());
+        }
+    }
+    
+    @SuppressWarnings("unchecked")
+    private void loadData() {
+        File file = new File(dataFilePath);
+        if (file.exists()) {
+            try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(dataFilePath))) {
+                users = (Map<String, User>) ois.readObject();
+                healthRecords = (List<HealthRecord>) ois.readObject();
+            } catch (IOException | ClassNotFoundException e) {
+                System.err.println("⚠️ Error loading data: " + e.getMessage());
+                users = new HashMap<>();
+                healthRecords = new ArrayList<>();
+            }
+        }
+    }
+    
+    public void clearAllData() {
+        users.clear();
+        healthRecords.clear();
+        saveData();
+    }
+}
